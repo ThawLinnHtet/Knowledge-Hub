@@ -1,0 +1,136 @@
+spring:
+  application:
+    name: knowledge-hub-api
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5433/knowledgehub}
+    username: ${POSTGRES_USER:kh_user}
+    password: ${POSTGRES_PASSWORD:kh_dev_secret}
+
+  docker:
+    compose:
+      file: ${COMPOSE_FILE:../compose.yaml}
+      lifecycle-management: start_only
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+  ai:
+    openai:
+      base-url: ${AI_PROVIDER_BASE_URL:https://openrouter.ai/api/v1}
+      api-key: ${AI_PROVIDER_API_KEY}
+      chat:
+        model: ${AI_CHAT_MODEL:google/gemini-2.5-flash-lite}
+      embedding:
+        model: ${AI_EMBEDDING_MODEL:nvidia/llama-nemotron-embed-vl-1b-v2:free}
+        dimensions: ${AI_EMBEDDING_DIMENSION:1024}
+        encoding-format: float
+
+  mail:
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+
+  servlet:
+    multipart:
+      max-file-size: ${HTTP_MULTIPART_MAX_FILE_SIZE:100MB}
+      max-request-size: ${HTTP_MULTIPART_MAX_REQUEST_SIZE:500MB}
+
+springdoc:
+  api-docs:
+    enabled: ${OPENAPI_ENABLED:true}
+  swagger-ui:
+    enabled: ${OPENAPI_ENABLED:true}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+logging:
+  structured:
+    format:
+      console: ${LOG_STRUCTURED_FORMAT:ecs}
+
+app:
+  base-url: ${APP_BASE_URL:http://localhost:8080}
+  web-url: ${APP_WEB_URL:http://localhost:5173}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  storage:
+    type: ${STORAGE_TYPE:minio}
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:${MINIO_ROOT_USER:kh_admin}}
+    secret-key: ${MINIO_SECRET_KEY:${MINIO_ROOT_PASSWORD:kh_dev_minio_secret}}
+    bucket-prefix: ${MINIO_BUCKET_PREFIX:kh-user}
+    download-url-ttl: ${STORAGE_DOWNLOAD_URL_TTL:5m}
+    orphan-cleanup-delay: ${STORAGE_ORPHAN_CLEANUP_DELAY:15m}
+    cleanup-poll-delay: ${STORAGE_CLEANUP_POLL_DELAY:1m}
+  upload:
+    allowed-extensions: pdf,docx,txt,md,markdown
+    allowed-mime-types: application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown
+    max-file-size-bytes: ${LIMIT_UPLOAD_MAX_SIZE_BYTES:52428800}
+    max-files-per-batch: ${LIMIT_UPLOAD_MAX_FILES_PER_BATCH:20}
+    confirmation-token-ttl: ${UPLOAD_CONFIRMATION_TOKEN_TTL:15m}
+    confirmation-token-cleanup-delay: ${UPLOAD_CONFIRMATION_TOKEN_CLEANUP_DELAY:1h}
+  jwt:
+    issuer: ${JWT_ISSUER:knowledge-hub}
+    audience: ${JWT_AUDIENCE:knowledge-hub-api}
+    access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:15m}
+    secret: ${JWT_SECRET:change-this-development-secret-32-bytes}
+  auth:
+    registration-enabled: ${REGISTRATION_ENABLED:true}
+    refresh-token-ttl: ${REFRESH_TOKEN_TTL:7d}
+    reset-token-ttl: ${RESET_TOKEN_TTL:15m}
+    secure-cookies: ${AUTH_SECURE_COOKIES:false}
+    rate-limit-max-attempts: ${AUTH_RATE_LIMIT_MAX_ATTEMPTS:20}
+    rate-limit-window: ${AUTH_RATE_LIMIT_WINDOW:1m}
+    log-reset-tokens: ${AUTH_LOG_RESET_TOKENS:false}
+  account-deletion:
+    initial-delay: ${ACCOUNT_DELETION_INITIAL_DELAY:30s}
+    poll-delay: ${ACCOUNT_DELETION_POLL_DELAY:30s}
+  ingestion:
+    max-extracted-characters: ${LIMIT_EXTRACTED_CHARACTER_COUNT:100000}
+    max-chunks: ${LIMIT_CHUNK_COUNT:500}
+    chunk-size: ${LIMIT_CHUNK_SIZE:1000}
+    chunk-overlap: ${LIMIT_CHUNK_OVERLAP:200}
+    embedding-dimension: ${AI_EMBEDDING_DIMENSION:1024}
+    embedding-model: ${AI_EMBEDDING_MODEL:nvidia/llama-nemotron-embed-vl-1b-v2:free}
+    fake-ai: ${AI_FAKE_MODE:true}
+    initial-delay: ${INGESTION_INITIAL_DELAY:30s}
+    poll-delay: ${INGESTION_POLL_DELAY:5s}
+    lease-duration: ${INGESTION_LEASE_DURATION:5m}
+    max-retries: ${INGESTION_MAX_RETRIES:5}
+    retry-delay: ${INGESTION_RETRY_DELAY:1m}
+  search:
+    max-results: ${LIMIT_RETRIEVED_CHUNK_COUNT:10}
+    max-query-characters: ${LIMIT_SEARCH_QUERY_CHARACTERS:500}
+    minimum-semantic-score: ${SEARCH_MINIMUM_SEMANTIC_SCORE:0.1}
+  chat:
+    fake-ai: ${AI_FAKE_MODE:true}
+    max-message-characters: ${LIMIT_CHAT_MESSAGE_CHARACTERS:4000}
+    max-scope-documents: ${LIMIT_CHAT_SCOPE_DOCUMENTS:50}
+    max-history-messages: ${LIMIT_CHAT_HISTORY_MESSAGES:12}
+    max-prompt-tokens: ${LIMIT_CHAT_TOKEN_BUDGET:4096}
+    retrieved-chunk-limit: ${LIMIT_RETRIEVED_CHUNK_COUNT:10}
+    minimum-keyword-score: ${CHAT_MINIMUM_KEYWORD_SCORE:0.01}
+    minimum-semantic-score: ${CHAT_MINIMUM_SEMANTIC_SCORE:0.7}
+    stream-timeout: ${CHAT_STREAM_TIMEOUT:2m}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: "!test & !prod"
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]

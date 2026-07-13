@@ -1,0 +1,23 @@
+spring:
+  docker:
+    compose:
+      enabled: false
+  ai:
+    openai:
+      api-key: test-key
+    vectorstore:
+      pgvector:
+        initialize-schema: false
+
+app:
+  storage:
+    type: fake
+  jwt:
+    secret: test-only-secret-that-is-at-least-32-bytes
+  account-deletion:
+    initial-delay: 1h
+  ingestion:
+    initial-delay: 1h
+    fake-ai: true
+  chat:
+    fake-ai: true

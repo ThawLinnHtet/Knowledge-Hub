@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "skills": {
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "93f53fd1c0352d3d7ec17b8f73d7351bf76f4821e55d123c9d2abc2c53ba48e4"
+    },
+    "grill-me": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/productivity/grill-me/SKILL.md",
+      "computedHash": "67e31b63e6e9e454cc2f51cd85b9cf1396ee46379a87c07a1450f33c47c1276a"
+    },
+    "grilling": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/productivity/grilling/SKILL.md",
+      "computedHash": "5e05f3e63506a5c11f7bd202d26a1b38f331ea609bcd0ffd3b84eac9c8ac973a"
+    },
+    "java-springboot": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/java-springboot/SKILL.md",
+      "computedHash": "f1b9c6b1277178fc33e5a612761c1cd1cf6ab5f946d05d69d52026d142c0a0c1"
+    },
+    "rag-implementation": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/llm-application-dev/skills/rag-implementation/SKILL.md",
+      "computedHash": "305766e72769b5531ec77e3653f9546d04e4be7d6e170580f1fb32ba6b843743"
+    },
+    "vercel-react-best-practices": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/react-best-practices/SKILL.md",
+      "computedHash": "ca7b0c0c6e5f2750043f7f0cd72d16ac4e2abc48f9b5500d047a4b77a2506212"
+    }
+  }
+}
