@@ -12,7 +12,8 @@ public interface AccountDeletionJobRepository
 
 	@Query(
 			value = "select * from account_deletion_jobs "
-					+ "where (status = 'PENDING' and (next_retry_at is null or next_retry_at <= :now)) "
+					+ "where (status in ('PENDING', 'FAILED') "
+					+ "and (next_retry_at is null or next_retry_at <= :now)) "
 					+ "or (status = 'PROCESSING' and lock_expires_at < :now) "
 					+ "order by created_at for update skip locked limit 1",
 			nativeQuery = true)

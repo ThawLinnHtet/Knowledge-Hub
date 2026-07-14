@@ -14,7 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class AccountDeletionService {
 
-	private final UserRepository userRepository;
+	private final AuthenticatedUserService authenticatedUsers;
 	private final RefreshTokenRepository refreshTokenRepository;
 	private final AccountDeletionJobRepository jobRepository;
 	private final PasswordEncoder passwordEncoder;
@@ -27,9 +27,12 @@ public class AccountDeletionService {
 					HttpStatus.BAD_REQUEST,
 					"Type DELETE exactly to confirm account deletion.");
 		}
-		UserEntity user = userRepository.findByEmailIgnoreCase(email)
-				.filter(candidate -> candidate.getStatus() == UserEntity.Status.ACTIVE)
-				.orElseThrow(this::invalidCredentials);
+		UserEntity user;
+		try {
+			user = authenticatedUsers.requireActiveForUpdate(email);
+		} catch (ApiException exception) {
+			throw invalidCredentials();
+		}
 		if (!passwordEncoder.matches(password, user.getPasswordHash())) {
 			throw invalidCredentials();
 		}

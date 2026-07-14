@@ -3,12 +3,9 @@ spring:
     compose:
       enabled: false
   ai:
-    openai:
-      api-key: test-key
-    vectorstore:
-      pgvector:
-        initialize-schema: false
-
+    model:
+      chat: none
+      embedding: none
 app:
   storage:
     type: fake

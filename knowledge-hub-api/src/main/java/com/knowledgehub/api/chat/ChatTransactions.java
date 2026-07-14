@@ -62,6 +62,12 @@ public class ChatTransactions {
 					idsJson(effective.documentIds()),
 					chatId);
 		}
+		jdbcTemplate.update(
+				"update chat_messages set status = 'FAILED', updated_at = now() "
+						+ "where chat_session_id = ? and role = 'ASSISTANT' and status = 'PENDING' "
+						+ "and updated_at < now() - (? * interval '1 millisecond')",
+				chatId,
+				properties.streamTimeout().toMillis());
 		UUID userMessageId = jdbcTemplate.queryForObject(
 				"insert into chat_messages (chat_session_id, role, content, status, scope_snapshot) "
 						+ "values (?, 'USER', ?, 'COMPLETE', cast(? as jsonb)) returning id",

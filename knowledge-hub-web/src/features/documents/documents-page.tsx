@@ -26,6 +26,7 @@ export function DocumentsPage() {
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(0)
   const [files, setFiles] = useState<File[]>([])
+  const [uploadInputVersion, setUploadInputVersion] = useState(0)
   const [collectionId, setCollectionId] = useState('')
   const [preflight, setPreflight] = useState<PreflightItem[] | null>(null)
   const [duplicateChoices, setDuplicateChoices] = useState<
@@ -93,6 +94,7 @@ export function DocumentsPage() {
       setNotice(`${count} document${count === 1 ? '' : 's'} uploaded`)
       setUploadResults(response.items)
       setFiles([])
+      setUploadInputVersion((value) => value + 1)
       setPreflight(null)
       setDuplicateChoices({})
       void queryClient.invalidateQueries({ queryKey: ['documents'] })
@@ -106,6 +108,18 @@ export function DocumentsPage() {
       void queryClient.invalidateQueries({ queryKey: ['documents'] })
     },
   })
+
+  function resetUploadReview() {
+    setFiles([])
+    setPreflight(null)
+    setDuplicateChoices({})
+    setReviewedFiles([])
+    setReviewedCollectionId('')
+    setUploadResults([])
+    setUploadInputVersion((value) => value + 1)
+    review.reset()
+    upload.reset()
+  }
 
   const error =
     review.error ??
@@ -177,6 +191,7 @@ export function DocumentsPage() {
               aria-label="Choose documents"
               className="sr-only"
               disabled={Boolean(preflight) || review.isPending}
+              key={uploadInputVersion}
               multiple
               onChange={(event) => {
                 setFiles(Array.from(event.target.files ?? []))
@@ -221,6 +236,7 @@ export function DocumentsPage() {
             onChoice={(index, value) =>
               setDuplicateChoices((current) => ({ ...current, [index]: value }))
             }
+            onReset={resetUploadReview}
             onUpload={() => upload.mutate()}
             pending={upload.isPending}
           />
@@ -334,12 +350,14 @@ function UploadReview({
   items,
   choices,
   onChoice,
+  onReset,
   onUpload,
   pending,
 }: {
   items: PreflightItem[]
   choices: Record<number, boolean>
   onChoice: (index: number, value: boolean) => void
+  onReset: () => void
   onUpload: () => void
   pending: boolean
 }) {
@@ -395,16 +413,21 @@ function UploadReview({
           </div>
         ))}
       </div>
-      <Button
-        className="mt-4"
-        disabled={!count || pending}
-        onClick={onUpload}
-        type="button"
-      >
-        {pending
-          ? 'Uploading...'
-          : `Upload ${count} document${count === 1 ? '' : 's'}`}
-      </Button>
+      <div className="mt-4 flex flex-wrap gap-3">
+        <Button disabled={!count || pending} onClick={onUpload} type="button">
+          {pending
+            ? 'Uploading...'
+            : `Upload ${count} document${count === 1 ? '' : 's'}`}
+        </Button>
+        <Button
+          disabled={pending}
+          onClick={onReset}
+          type="button"
+          variant="ghost"
+        >
+          Start over
+        </Button>
+      </div>
     </div>
   )
 }

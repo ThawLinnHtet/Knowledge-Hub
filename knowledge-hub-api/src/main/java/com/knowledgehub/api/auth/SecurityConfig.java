@@ -30,6 +30,7 @@ import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 
@@ -74,6 +75,8 @@ public class SecurityConfig {
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 		CookieCsrfTokenRepository csrfRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+		JwtAuthenticationConverter authenticationConverter = new JwtAuthenticationConverter();
+		authenticationConverter.setPrincipalClaimName("uid");
 		return http.cors(Customizer.withDefaults())
 				.csrf(csrf -> csrf.csrfTokenRepository(csrfRepository)
 						.requireCsrfProtectionMatcher(request ->
@@ -95,7 +98,7 @@ public class SecurityConfig {
 						.anyRequest()
 						.authenticated())
 				.oauth2ResourceServer(oauth -> oauth
-						.jwt(Customizer.withDefaults())
+						.jwt(jwt -> jwt.jwtAuthenticationConverter(authenticationConverter))
 						.authenticationEntryPoint((request, response, exception) ->
 								writeError(response, request, 401, ErrorCode.AUTHENTICATION_REQUIRED)))
 				.exceptionHandling(errors -> errors

@@ -11,6 +11,9 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 import com.knowledgehub.api.common.ApiException;
@@ -33,18 +36,21 @@ public class ChatStreamService {
 	private final ChatCompletionClient chatClient;
 	private final ChatProperties properties;
 	private final Executor executor;
+	private final ScheduledExecutorService heartbeatScheduler;
 
 	public ChatStreamService(
 			ChatTransactions transactions,
 			RagRetrievalService retrievalService,
 			ChatCompletionClient chatClient,
 			ChatProperties properties,
-			@Qualifier("chatExecutor") Executor executor) {
+			@Qualifier("chatExecutor") Executor executor,
+			@Qualifier("chatHeartbeatScheduler") ScheduledExecutorService heartbeatScheduler) {
 		this.transactions = transactions;
 		this.retrievalService = retrievalService;
 		this.chatClient = chatClient;
 		this.properties = properties;
 		this.executor = executor;
+		this.heartbeatScheduler = heartbeatScheduler;
 	}
 
 	public SseEmitter stream(
@@ -67,12 +73,19 @@ public class ChatStreamService {
 	}
 
 	private void process(Turn turn, SseEmitter emitter, AtomicBoolean terminated) {
+		ScheduledFuture<?> heartbeatTask = null;
 		try {
 			send(emitter, "started", Map.of(
 					"sessionId", turn.chatId(),
 					"userMessageId", turn.userMessageId(),
 					"assistantMessageId", turn.assistantMessageId(),
 					"scope", turn.scope()));
+			long heartbeatMillis = properties.heartbeatInterval().toMillis();
+			heartbeatTask = heartbeatScheduler.scheduleAtFixedRate(
+					() -> heartbeat(emitter, terminated),
+					heartbeatMillis,
+					heartbeatMillis,
+					TimeUnit.MILLISECONDS);
 			List<RetrievedChunk> retrieved = retrievalService.retrieve(
 					turn.email(),
 					turn.question(),
@@ -86,9 +99,6 @@ public class ChatStreamService {
 			if (evidence.isEmpty()) {
 				answer = REFUSAL;
 				evidenceStatus = "INSUFFICIENT";
-				for (String delta : deltas(answer)) {
-					send(emitter, "delta", Map.of("messageId", turn.assistantMessageId(), "text", delta));
-				}
 			} else {
 				var history = transactions.history(turn.chatId(), turn.userMessageId());
 				List<Evidence> sources = budgetedEvidence(evidence, turn.question(), history)
@@ -102,7 +112,6 @@ public class ChatStreamService {
 				chatClient.stream(new GroundedChatRequest(turn.question(), history, sources), delta -> {
 					if (terminated.get()) throw new IllegalStateException("The chat stream ended.");
 					streamed.append(delta);
-					send(emitter, "delta", Map.of("messageId", turn.assistantMessageId(), "text", delta));
 				});
 				answer = streamed.toString();
 				cited = citedEvidence(answer, evidence);
@@ -120,6 +129,9 @@ public class ChatStreamService {
 				throw new IllegalStateException("The chat stream ended before completion.");
 			}
 			transactions.complete(turn, answer, cited);
+			for (String delta : deltas(answer)) {
+				send(emitter, "delta", Map.of("messageId", turn.assistantMessageId(), "text", delta));
+			}
 			log.atInfo()
 					.addKeyValue("chatId", turn.chatId())
 					.addKeyValue("aiProvider", properties.fakeAi() ? "fake" : "openai-compatible")
@@ -150,6 +162,8 @@ public class ChatStreamService {
 			} catch (RuntimeException ignored) {
 				emitter.completeWithError(exception);
 			}
+		} finally {
+			if (heartbeatTask != null) heartbeatTask.cancel(false);
 		}
 	}
 
@@ -209,6 +223,15 @@ public class ChatStreamService {
 			emitter.send(SseEmitter.event().name(event).data(data));
 		} catch (IOException exception) {
 			throw new IllegalStateException("The chat stream was interrupted.", exception);
+		}
+	}
+
+	private void heartbeat(SseEmitter emitter, AtomicBoolean terminated) {
+		if (terminated.get()) return;
+		try {
+			emitter.send(SseEmitter.event().comment("grounding"));
+		} catch (IOException | IllegalStateException exception) {
+			terminated.set(true);
 		}
 	}
 }

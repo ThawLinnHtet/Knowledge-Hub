@@ -1,6 +1,7 @@
 package com.knowledgehub.api.settings;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import com.knowledgehub.api.chat.ChatProperties;
 import com.knowledgehub.api.documents.UploadProperties;
@@ -22,7 +23,7 @@ class SettingsControllerTest {
 				Duration.ofMinutes(5), 5, Duration.ofMinutes(1));
 		SearchProperties search = new SearchProperties(10, 500, 0.1);
 		ChatProperties chat = new ChatProperties(
-				true, 4_000, 50, 12, 4_096, 10, 0.01, 0.7, Duration.ofMinutes(2));
+				true, 4_000, 50, 12, 4_096, 10, 0.01, 0.7, Duration.ofMinutes(2), Duration.ofSeconds(10));
 		SettingsController controller = new SettingsController(
 				upload, ingestion, search, chat, "google/gemini-2.5-flash-lite");
 
@@ -36,5 +37,17 @@ class SettingsControllerTest {
 		assertThat(response.maxFilesPerBatch()).isEqualTo(20);
 		assertThat(response.maxRetrievedChunks()).isEqualTo(10);
 		assertThat(response.maxChatMessageCharacters()).isEqualTo(4_000);
+	}
+
+	@Test
+	void rejectsInvalidChatStreamTiming() {
+		assertThatIllegalArgumentException()
+				.isThrownBy(() -> new ChatProperties(
+						true, 4_000, 50, 12, 4_096, 10, 0.01, 0.7,
+						Duration.ofMinutes(2), Duration.ofNanos(1)));
+		assertThatIllegalArgumentException()
+				.isThrownBy(() -> new ChatProperties(
+						true, 4_000, 50, 12, 4_096, 10, 0.01, 0.7,
+						Duration.ofSeconds(10), Duration.ofSeconds(10)));
 	}
 }

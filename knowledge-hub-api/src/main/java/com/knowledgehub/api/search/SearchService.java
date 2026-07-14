@@ -7,7 +7,7 @@ import com.knowledgehub.api.ingestion.IngestionException;
 import com.knowledgehub.api.search.SearchDtos.Mode;
 import com.knowledgehub.api.search.SearchDtos.SearchFilters;
 import com.knowledgehub.api.search.SearchDtos.SearchResponse;
-import com.knowledgehub.api.users.UserRepository;
+import com.knowledgehub.api.users.AuthenticatedUserService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
@@ -22,7 +22,7 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class SearchService {
 
-	private final UserRepository userRepository;
+	private final AuthenticatedUserService authenticatedUsers;
 	private final SearchRepository searchRepository;
 	private final DocumentEmbeddingClient embeddingClient;
 	private final SearchProperties properties;
@@ -38,13 +38,7 @@ public class SearchService {
 			Instant uploadedTo,
 			int limit) {
 		String normalizedQuery = validate(query, uploadedFrom, uploadedTo, limit);
-		UUID userId = userRepository
-				.findByEmailIgnoreCase(email)
-				.orElseThrow(() -> new ApiException(
-						ErrorCode.AUTHENTICATION_REQUIRED,
-						HttpStatus.UNAUTHORIZED,
-						"Authentication is required."))
-				.getId();
+		UUID userId = authenticatedUsers.userId(email);
 		String normalizedExtension = normalizeExtension(fileExtension);
 		float[] queryEmbedding = null;
 		if (mode != Mode.KEYWORD) {

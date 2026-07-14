@@ -68,4 +68,27 @@ describe('chat SSE client', () => {
       ),
     ).rejects.toThrow('interrupted before completion')
   })
+
+  it('rejects a terminal error event with the server message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          streamedResponse([
+            'event:error\ndata:{"code":"PROVIDER_ERROR","message":"Provider unavailable","recoverable":true}\n\n',
+          ]),
+        ),
+    )
+
+    await expect(
+      streamChat(
+        'chat-1',
+        'Question',
+        { type: 'ALL', collectionId: null, documentIds: [] },
+        'token',
+        () => undefined,
+      ),
+    ).rejects.toThrow('Provider unavailable')
+  })
 })

@@ -113,6 +113,7 @@ describe('documents workspace', () => {
     await user.click(screen.getByRole('button', { name: 'Upload 1 document' }))
 
     expect(await screen.findByText('1 document uploaded')).toBeInTheDocument()
+    expect(screen.getByLabelText('Choose documents')).not.toBe(input)
     const request = http.history.post.find(
       (item) => item.url === '/api/v1/documents/uploads',
     )
@@ -131,5 +132,51 @@ describe('documents workspace', () => {
         confirmationToken: 'duplicate-token',
       },
     ])
+  })
+
+  it('can start over when every reviewed duplicate is skipped', async () => {
+    const user = userEvent.setup()
+    http.onGet('/api/v1/documents').reply(200, {
+      items: [],
+      page: 0,
+      size: 20,
+      totalElements: 0,
+      totalPages: 0,
+    })
+    http.onGet('/api/v1/collections').reply(200, [])
+    http.onPost('/api/v1/documents/uploads/preflight').reply(200, {
+      items: [
+        {
+          filename: 'notes.txt',
+          status: 'DUPLICATE',
+          sizeBytes: 5,
+          detectedMediaType: 'text/plain',
+          sha256Hash: 'hash',
+          confirmationToken: 'duplicate-token',
+          error: null,
+        },
+      ],
+    })
+
+    renderWorkspace()
+    const input = await screen.findByLabelText('Choose documents')
+    await user.upload(
+      input,
+      new File(['notes'], 'notes.txt', { type: 'text/plain' }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Review upload' }))
+
+    expect(
+      await screen.findByText('Already in your library'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Upload 0 documents' }),
+    ).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Start over' }))
+
+    expect(
+      screen.queryByText('Already in your library'),
+    ).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Choose documents')).toBeEnabled()
   })
 })

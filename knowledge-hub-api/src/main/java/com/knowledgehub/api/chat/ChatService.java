@@ -7,7 +7,7 @@ import com.knowledgehub.api.chat.ChatDtos.Scope;
 import com.knowledgehub.api.chat.ChatDtos.ScopeType;
 import com.knowledgehub.api.common.ApiException;
 import com.knowledgehub.api.common.ErrorCode;
-import com.knowledgehub.api.users.UserRepository;
+import com.knowledgehub.api.users.AuthenticatedUserService;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
@@ -24,9 +24,10 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class ChatService {
 
-	private final UserRepository userRepository;
+	private final AuthenticatedUserService authenticatedUsers;
 	private final JdbcTemplate jdbcTemplate;
 	private final ChatScopeService scopeService;
+	private final ChatProperties properties;
 	private final ObjectMapper objectMapper;
 
 	@Transactional
@@ -76,6 +77,7 @@ public class ChatService {
 		}
 	}
 
+	@Transactional
 	public List<MessageResponse> messages(String email, UUID chatId) {
 		UUID userId = userId(email);
 		if (jdbcTemplate.queryForObject(
@@ -85,6 +87,12 @@ public class ChatService {
 				userId) == 0) {
 			throw chatNotFound();
 		}
+		jdbcTemplate.update(
+				"update chat_messages set status = 'FAILED', updated_at = now() "
+						+ "where chat_session_id = ? and role = 'ASSISTANT' and status = 'PENDING' "
+						+ "and updated_at < now() - (? * interval '1 millisecond')",
+				chatId,
+				properties.streamTimeout().toMillis());
 		return jdbcTemplate.query(
 				"select * from chat_messages where chat_session_id = ? order by created_at, "
 						+ "case when role = 'USER' then 0 else 1 end, id",
@@ -100,12 +108,7 @@ public class ChatService {
 	}
 
 	UUID userId(String email) {
-		return userRepository.findByEmailIgnoreCase(email)
-				.orElseThrow(() -> new ApiException(
-						ErrorCode.AUTHENTICATION_REQUIRED,
-						HttpStatus.UNAUTHORIZED,
-						"Authentication is required."))
-				.getId();
+		return authenticatedUsers.userId(email);
 	}
 
 	String scopeJson(Scope scope) {

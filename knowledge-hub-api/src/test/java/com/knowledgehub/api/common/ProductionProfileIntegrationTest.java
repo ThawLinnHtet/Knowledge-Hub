@@ -10,15 +10,24 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @ActiveProfiles({"test", "prod"})
 @Import(TestcontainersConfiguration.class)
 @AutoConfigureMockMvc
-@SpringBootTest
+@SpringBootTest(properties = {
+	"spring.ai.model.chat=none",
+	"spring.ai.model.embedding=none",
+	"MINIO_ACCESS_KEY=test-application-key",
+	"MINIO_SECRET_KEY=test-application-secret"
+})
 class ProductionProfileIntegrationTest {
 
 	private final MockMvc mockMvc;
+
+	@MockitoBean
+	private ProductionSafetyValidator productionSafetyValidator;
 
 	@Autowired
 	ProductionProfileIntegrationTest(MockMvc mockMvc) {

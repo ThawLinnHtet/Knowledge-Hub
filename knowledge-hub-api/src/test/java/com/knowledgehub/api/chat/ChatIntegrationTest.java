@@ -16,9 +16,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.knowledgehub.api.TestcontainersConfiguration;
 import com.knowledgehub.api.ai.ChatCompletionClient;
 import com.knowledgehub.api.ingestion.DocumentEmbeddingClient;
+import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,7 +40,7 @@ import tools.jackson.databind.ObjectMapper;
 @ActiveProfiles("test")
 @Import(TestcontainersConfiguration.class)
 @AutoConfigureMockMvc
-@SpringBootTest
+@SpringBootTest(properties = "app.chat.heartbeat-interval=50ms")
 class ChatIntegrationTest {
 
 	private static final String PASSWORD = "correct-horse-battery-staple";
@@ -175,6 +178,7 @@ class ChatIntegrationTest {
 				.getContentAsString();
 		assertThat(events)
 				.contains("event:completed", "INSUFFICIENT", "couldn't find sufficient support")
+				.doesNotContain("Hello!")
 				.doesNotContain("event:error");
 
 		mockMvc.perform(get("/api/v1/chats/{id}/messages", chatId)
@@ -182,6 +186,82 @@ class ChatIntegrationTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[1].status").value("COMPLETE"))
 				.andExpect(jsonPath("$[1].citations.length()").value(0));
+	}
+
+	@Test
+	void sendsHeartbeatWhileProviderHasNotProducedAResponse() throws Exception {
+		CountDownLatch providerStarted = new CountDownLatch(1);
+		CountDownLatch releaseProvider = new CountDownLatch(1);
+		doAnswer(invocation -> {
+			ChatCompletionClient.GroundedChatRequest request = invocation.getArgument(0);
+			Consumer<String> consumer = invocation.getArgument(1);
+			providerStarted.countDown();
+			if (!releaseProvider.await(2, TimeUnit.SECONDS)) {
+				throw new IllegalStateException("Provider was not released by the test.");
+			}
+			consumer.accept("Grounded answer [" + request.evidence().getFirst().sourceId() + "].");
+			return null;
+		}).when(chatClient).stream(any(), any());
+		Session owner = registerAndLogin("heartbeat-chat@example.com");
+		UUID collectionId = fallbackCollection(owner.userId());
+		UUID documentId = insertDocument(owner.userId(), collectionId, "manual.md", "READY");
+		insertChunk(documentId, "Retries use bounded backoff.", embeddingClient.embed("retries"));
+		UUID chatId = createChat(owner, "Heartbeat");
+
+		MvcResult stream = mockMvc.perform(post("/api/v1/chats/{id}/messages:stream", chatId)
+					.header("Authorization", owner.authorization())
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(objectMapper.writeValueAsString(Map.of("content", "retries"))))
+				.andExpect(request().asyncStarted())
+				.andReturn();
+		try {
+			assertThat(providerStarted.await(2, TimeUnit.SECONDS)).isTrue();
+			assertThat(awaitResponseContent(stream, ":grounding", 1, TimeUnit.SECONDS))
+					.contains(":grounding");
+		} finally {
+			releaseProvider.countDown();
+		}
+		mockMvc.perform(asyncDispatch(stream)).andExpect(status().isOk());
+	}
+
+	@Test
+	void stalePendingAssistantMessageDoesNotBlockTheNextTurn() throws Exception {
+		Session owner = registerAndLogin("stale-chat@example.com");
+		UUID collectionId = fallbackCollection(owner.userId());
+		UUID documentId = insertDocument(owner.userId(), collectionId, "manual.md", "READY");
+		insertChunk(documentId, "The service uses bounded retries.", embeddingClient.embed("retries"));
+		UUID chatId = createChat(owner, "Recovered conversation");
+		String scope = objectMapper.writeValueAsString(
+				Map.of("type", "ALL", "collectionId", "", "documentIds", new UUID[0]));
+		jdbcTemplate.update(
+				"insert into chat_messages (chat_session_id, role, content, status, scope_snapshot, "
+						+ "created_at, updated_at) values (?, 'ASSISTANT', '', 'PENDING', cast(? as jsonb), "
+						+ "now() - interval '1 day', now() - interval '1 day')",
+				chatId,
+				scope);
+		mockMvc.perform(get("/api/v1/chats/{id}/messages", chatId)
+					.header("Authorization", owner.authorization()))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].status").value("FAILED"));
+
+		MvcResult stream = mockMvc.perform(post("/api/v1/chats/{id}/messages:stream", chatId)
+					.header("Authorization", owner.authorization())
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(objectMapper.writeValueAsString(Map.of("content", "retries"))))
+				.andExpect(request().asyncStarted())
+				.andReturn();
+		mockMvc.perform(asyncDispatch(stream)).andExpect(status().isOk());
+
+		assertThat(jdbcTemplate.queryForObject(
+				"select count(*) from chat_messages where chat_session_id = ? and status = 'PENDING'",
+				Integer.class,
+				chatId))
+				.isZero();
+		assertThat(jdbcTemplate.queryForObject(
+				"select count(*) from chat_messages where chat_session_id = ? and status = 'FAILED'",
+				Integer.class,
+				chatId))
+				.isEqualTo(1);
 	}
 
 	@Test
@@ -289,6 +369,18 @@ class ChatIntegrationTest {
 
 	private JsonNode body(MvcResult result) throws Exception {
 		return objectMapper.readTree(result.getResponse().getContentAsByteArray());
+	}
+
+	private String awaitResponseContent(
+			MvcResult result, String expected, long timeout, TimeUnit unit) throws Exception {
+		long deadline = System.nanoTime() + unit.toNanos(timeout);
+		String content;
+		do {
+			content = result.getResponse().getContentAsString(StandardCharsets.UTF_8);
+			if (content.contains(expected)) return content;
+			Thread.sleep(10);
+		} while (System.nanoTime() < deadline);
+		return content;
 	}
 
 	private record Session(UUID userId, String accessToken) {

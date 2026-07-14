@@ -7,8 +7,8 @@ import com.knowledgehub.api.common.ErrorCode;
 import com.knowledgehub.api.common.ErrorResponse;
 import com.knowledgehub.api.documents.UploadValidator.UploadRejectedException;
 import com.knowledgehub.api.documents.UploadValidator.ValidatedUpload;
+import com.knowledgehub.api.users.AuthenticatedUserService;
 import com.knowledgehub.api.users.UserEntity;
-import com.knowledgehub.api.users.UserRepository;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -24,7 +24,7 @@ import org.springframework.web.multipart.MultipartFile;
 @RequiredArgsConstructor
 public class UploadPreflightService {
 
-	private final UserRepository userRepository;
+	private final AuthenticatedUserService authenticatedUsers;
 	private final CollectionRepository collectionRepository;
 	private final DocumentRepository documentRepository;
 	private final UploadValidator uploadValidator;
@@ -40,11 +40,7 @@ public class UploadPreflightService {
 					"The upload batch contains too many files.",
 					Map.of("maxFilesPerBatch", uploadProperties.maxFilesPerBatch()));
 		}
-		UserEntity user = userRepository.findByEmailIgnoreCase(email)
-				.orElseThrow(() -> new ApiException(
-						ErrorCode.AUTHENTICATION_REQUIRED,
-						HttpStatus.UNAUTHORIZED,
-						"Authentication is required."));
+		UserEntity user = authenticatedUsers.requireActive(email);
 		CollectionEntity collection = collectionId == null
 				? null
 				: collectionRepository

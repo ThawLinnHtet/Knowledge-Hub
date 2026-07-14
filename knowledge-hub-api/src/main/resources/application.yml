@@ -18,9 +18,12 @@ spring:
       ddl-auto: validate
 
   ai:
+    model:
+      chat: ${AI_MODEL_CHAT:none}
+      embedding: ${AI_MODEL_EMBEDDING:none}
     openai:
       base-url: ${AI_PROVIDER_BASE_URL:https://openrouter.ai/api/v1}
-      api-key: ${AI_PROVIDER_API_KEY}
+      api-key: ${AI_PROVIDER_API_KEY:}
       chat:
         model: ${AI_CHAT_MODEL:google/gemini-2.5-flash-lite}
       embedding:
@@ -33,6 +36,12 @@ spring:
     port: ${SMTP_PORT:587}
     username: ${SMTP_USERNAME:}
     password: ${SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          starttls:
+            enable: ${SMTP_STARTTLS_ENABLED:false}
+            required: ${SMTP_STARTTLS_REQUIRED:false}
 
   servlet:
     multipart:
@@ -125,6 +134,7 @@ app:
     minimum-keyword-score: ${CHAT_MINIMUM_KEYWORD_SCORE:0.01}
     minimum-semantic-score: ${CHAT_MINIMUM_SEMANTIC_SCORE:0.7}
     stream-timeout: ${CHAT_STREAM_TIMEOUT:2m}
+    heartbeat-interval: ${CHAT_HEARTBEAT_INTERVAL:10s}
 
 ---
 spring:

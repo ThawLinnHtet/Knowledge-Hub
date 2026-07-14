@@ -8,8 +8,8 @@ import com.knowledgehub.api.documents.DocumentUploadController.UploadDecisionTyp
 import com.knowledgehub.api.documents.UploadValidator.ValidatedUpload;
 import com.knowledgehub.api.storage.ObjectStorage;
 import com.knowledgehub.api.storage.ObjectStorageException;
+import com.knowledgehub.api.users.AuthenticatedUserService;
 import com.knowledgehub.api.users.UserEntity;
-import com.knowledgehub.api.users.UserRepository;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.UUID;
@@ -25,7 +25,7 @@ import org.springframework.web.multipart.MultipartFile;
 @RequiredArgsConstructor
 public class ConfirmedUploadItemProcessor {
 
-	private final UserRepository userRepository;
+	private final AuthenticatedUserService authenticatedUsers;
 	private final CollectionRepository collectionRepository;
 	private final DocumentRepository documentRepository;
 	private final UploadConfirmationTokenService confirmationTokenService;
@@ -43,11 +43,7 @@ public class ConfirmedUploadItemProcessor {
 			UploadDecisionType decision,
 			String confirmationToken,
 			String objectKey) {
-		UserEntity user = userRepository.findById(userId)
-				.orElseThrow(() -> new ApiException(
-						ErrorCode.AUTHENTICATION_REQUIRED,
-						HttpStatus.UNAUTHORIZED,
-						"Authentication is required."));
+		UserEntity user = authenticatedUsers.requireActiveForUpdate(userId.toString());
 		CollectionEntity collection = collectionRepository
 				.findByIdAndUserId(targetCollectionId, userId)
 				.orElseThrow(() -> new ApiException(

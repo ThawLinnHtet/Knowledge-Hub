@@ -178,6 +178,9 @@ describe('chat workspace', () => {
 
     renderWorkspace('/chat')
     await screen.findByText('Research questions')
+    await waitFor(() =>
+      expect(screen.getByLabelText('Knowledge scope')).toBeEnabled(),
+    )
     await user.selectOptions(
       screen.getByLabelText('Knowledge scope'),
       'COLLECTION',
@@ -212,6 +215,62 @@ describe('chat workspace', () => {
     })
   })
 
+  it('does not allow sending until conversation history is loaded', async () => {
+    let releaseMessages!: () => void
+    http.onGet('/api/v1/chats').reply(200, [session])
+    http.onGet('/api/v1/chats/chat-1/messages').reply(
+      () =>
+        new Promise<[number, unknown[]]>((resolve) => {
+          releaseMessages = () => resolve([200, []])
+        }),
+    )
+    http.onGet('/api/v1/collections').reply(200, [])
+    http.onGet('/api/v1/documents').reply(200, {
+      items: [],
+      page: 0,
+      totalPages: 0,
+      totalElements: 0,
+    })
+
+    renderWorkspace('/chat')
+    await screen.findByText('Research questions')
+
+    expect(screen.getByLabelText('Message')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+
+    releaseMessages()
+    await waitFor(() => expect(screen.getByLabelText('Message')).toBeEnabled())
+  })
+
+  it('allows conversation history to be reloaded after an error', async () => {
+    const user = userEvent.setup()
+    http.onGet('/api/v1/chats').reply(200, [session])
+    http
+      .onGet('/api/v1/chats/chat-1/messages')
+      .replyOnce(500)
+      .onGet('/api/v1/chats/chat-1/messages')
+      .reply(200, [])
+    http.onGet('/api/v1/collections').reply(200, [])
+    http.onGet('/api/v1/documents').reply(200, {
+      items: [],
+      page: 0,
+      totalPages: 0,
+      totalElements: 0,
+    })
+
+    renderWorkspace('/chat')
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Retry loading conversation',
+      }),
+    )
+    await waitFor(() => expect(screen.getByLabelText('Message')).toBeEnabled())
+    expect(
+      http.history.get.filter((request) => request.url?.endsWith('/messages')),
+    ).toHaveLength(2)
+  })
+
   it('shows recoverable stream failures and deleted historical sources', async () => {
     const user = userEvent.setup()
     http.onGet('/api/v1/chats').reply(200, [session])
@@ -238,28 +297,33 @@ describe('chat workspace', () => {
         createdAt: '2026-07-12T10:00:00Z',
       },
     ])
-    http.onGet('/api/v1/collections').reply(200, [])
+    http.onGet('/api/v1/collections').reply(200, [
+      {
+        id: 'collection-1',
+        name: 'Operations',
+        uncategorized: false,
+        documentCount: 1,
+      },
+    ])
     http.onGet('/api/v1/documents').reply(200, {
       items: [],
       page: 0,
       totalPages: 0,
       totalElements: 0,
     })
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(
-        sseResponse([
-          {
-            event: 'error',
-            data: {
-              code: 'PROVIDER_ERROR',
-              message: 'The chat response could not be completed.',
-              recoverable: true,
-            },
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        {
+          event: 'error',
+          data: {
+            code: 'PROVIDER_ERROR',
+            message: 'The chat response could not be completed.',
+            recoverable: true,
           },
-        ]),
-      ),
+        },
+      ]),
     )
+    vi.stubGlobal('fetch', fetchMock)
 
     renderWorkspace('/chat')
     expect(await screen.findByText(/Source deleted/)).toBeInTheDocument()
@@ -278,5 +342,184 @@ describe('chat workspace', () => {
         'The turn may already be saved. Review the history before sending a new attempt.',
       ),
     ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Retry question' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Try this question')).not.toBeInTheDocument()
+
+    await user.selectOptions(
+      screen.getByLabelText('Knowledge scope'),
+      'COLLECTION',
+    )
+    await user.selectOptions(
+      screen.getByLabelText('Collection'),
+      'collection-1',
+    )
+    await user.click(screen.getByRole('button', { name: 'Retry question' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
+      content: 'Try this question',
+      scope: { type: 'ALL', collectionId: null, documentIds: [] },
+    })
+  })
+
+  it('does not offer retry while the failed stream turn is still active', async () => {
+    const user = userEvent.setup()
+    const activeMessages = [
+      {
+        id: 'assistant-active',
+        role: 'ASSISTANT',
+        status: 'PENDING',
+        content: '',
+        scope: { type: 'ALL', collectionId: null, documentIds: [] },
+        citations: [],
+        createdAt: '2026-07-12T10:01:00Z',
+      },
+    ]
+    http.onGet('/api/v1/chats').reply(200, [session])
+    http
+      .onGet('/api/v1/chats/chat-1/messages')
+      .replyOnce(200, [])
+      .onGet('/api/v1/chats/chat-1/messages')
+      .reply(200, activeMessages)
+    http.onGet('/api/v1/collections').reply(200, [])
+    http.onGet('/api/v1/documents').reply(200, {
+      items: [],
+      page: 0,
+      totalPages: 0,
+      totalElements: 0,
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        sseResponse([
+          {
+            event: 'started',
+            data: { assistantMessageId: 'assistant-active' },
+          },
+          {
+            event: 'error',
+            data: {
+              code: 'PROVIDER_ERROR',
+              message: 'The chat response could not be completed.',
+              recoverable: true,
+            },
+          },
+        ]),
+      ),
+    )
+
+    renderWorkspace('/chat')
+    await screen.findByText('Research questions')
+    await waitFor(() => expect(screen.getByLabelText('Message')).toBeEnabled())
+    await user.type(screen.getByLabelText('Message'), 'Try this question')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    expect(
+      await screen.findByText('The chat response could not be completed.'),
+    ).toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Retry question' }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(screen.getByLabelText('Message')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+  })
+
+  it('reconciles a retry that persists before its stream starts', async () => {
+    const user = userEvent.setup()
+    const failedMessages = [
+      {
+        id: 'assistant-failed',
+        role: 'ASSISTANT',
+        status: 'FAILED',
+        content: '',
+        scope: { type: 'ALL', collectionId: null, documentIds: [] },
+        citations: [],
+        createdAt: '2026-07-12T10:01:00Z',
+      },
+    ]
+    const retriedMessages = [
+      ...failedMessages,
+      {
+        ...failedMessages[0],
+        id: 'assistant-older-uncached',
+        status: 'COMPLETE',
+        content: 'An older completed answer.',
+        createdAt: '2026-07-12T10:01:30Z',
+      },
+      {
+        ...failedMessages[0],
+        id: 'assistant-retried',
+        status: 'PENDING',
+        createdAt: '2026-07-12T10:02:00Z',
+      },
+    ]
+    http.onGet('/api/v1/chats').reply(200, [session])
+    http
+      .onGet('/api/v1/chats/chat-1/messages')
+      .replyOnce(200, [])
+      .onGet('/api/v1/chats/chat-1/messages')
+      .replyOnce(200, failedMessages)
+      .onGet('/api/v1/chats/chat-1/messages')
+      .reply(200, retriedMessages)
+    http.onGet('/api/v1/collections').reply(200, [])
+    http.onGet('/api/v1/documents').reply(200, {
+      items: [],
+      page: 0,
+      totalPages: 0,
+      totalElements: 0,
+    })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse([
+          {
+            event: 'started',
+            data: { assistantMessageId: 'assistant-failed' },
+          },
+          {
+            event: 'error',
+            data: {
+              code: 'PROVIDER_ERROR',
+              message: 'The chat response could not be completed.',
+              recoverable: true,
+            },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        sseResponse([
+          {
+            event: 'error',
+            data: {
+              code: 'PROVIDER_ERROR',
+              message: 'The retry stream was interrupted.',
+              recoverable: true,
+            },
+          },
+        ]),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderWorkspace('/chat')
+    await screen.findByText('Research questions')
+    await waitFor(() => expect(screen.getByLabelText('Message')).toBeEnabled())
+    await user.type(screen.getByLabelText('Message'), 'Try this question')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await user.click(
+      await screen.findByRole('button', { name: 'Retry question' }),
+    )
+
+    expect(
+      await screen.findByText('The retry stream was interrupted.'),
+    ).toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Retry question' }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(screen.getByLabelText('Message')).toBeDisabled()
   })
 })

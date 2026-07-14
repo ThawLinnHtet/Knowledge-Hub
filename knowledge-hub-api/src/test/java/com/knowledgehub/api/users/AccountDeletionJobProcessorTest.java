@@ -35,15 +35,17 @@ class AccountDeletionJobProcessorTest {
 	}
 
 	@Test
-	void cleanupFailureStopsAfterRetryCap() {
+	void cleanupFailureKeepsRetryingWithCappedBackoff() {
 		AccountDeletionJobRepository repository = mock(AccountDeletionJobRepository.class);
 		AccountDeletionJobEntity job = pendingJob(4);
 		when(repository.findById(job.getId())).thenReturn(Optional.of(job));
 		AccountDeletionTransactions transactionService =
 				new AccountDeletionTransactions(repository, mock(UserRepository.class));
-		transactionService.recordFailure(job.getId(), java.time.Instant.now(), "permanent failure");
-		assertThat(job.getStatus()).isEqualTo(AccountDeletionJobEntity.Status.FAILED);
+		java.time.Instant now = java.time.Instant.now();
+		transactionService.recordFailure(job.getId(), now, "storage unavailable");
+		assertThat(job.getStatus()).isEqualTo(AccountDeletionJobEntity.Status.PENDING);
 		assertThat(job.getRetryCount()).isEqualTo(5);
+		assertThat(job.getNextRetryAt()).isAfter(now);
 	}
 
 	private AccountDeletionTransactions.ClaimedJob claimedJob() {

@@ -15,8 +15,8 @@ import com.knowledgehub.api.documents.DocumentUploadController.UploadDecisionTyp
 import com.knowledgehub.api.documents.DocumentUploadController.UploadManifest;
 import com.knowledgehub.api.storage.StorageCleanupService;
 import com.knowledgehub.api.storage.StorageProperties;
+import com.knowledgehub.api.users.AuthenticatedUserService;
 import com.knowledgehub.api.users.UserEntity;
-import com.knowledgehub.api.users.UserRepository;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -36,7 +36,7 @@ class ConfirmedUploadServiceTest {
 		user.setId(userId);
 		CollectionEntity collection = new CollectionEntity();
 		collection.setId(collectionId);
-		UserRepository userRepository = mock(UserRepository.class);
+		AuthenticatedUserService authenticatedUsers = mock(AuthenticatedUserService.class);
 		CollectionRepository collectionRepository = mock(CollectionRepository.class);
 		UploadValidator uploadValidator = mock(UploadValidator.class);
 		ConfirmedUploadItemProcessor itemProcessor = mock(ConfirmedUploadItemProcessor.class);
@@ -78,7 +78,7 @@ class ConfirmedUploadServiceTest {
 				null,
 				null);
 
-		when(userRepository.findByEmailIgnoreCase("owner@example.com")).thenReturn(Optional.of(user));
+		when(authenticatedUsers.requireActive("owner-id")).thenReturn(user);
 		when(collectionRepository.findByUserIdAndUncategorizedTrue(userId))
 				.thenReturn(Optional.of(collection));
 		when(uploadValidator.validate(file)).thenReturn(validated);
@@ -89,7 +89,7 @@ class ConfirmedUploadServiceTest {
 				.when(cleanupService)
 				.cancel(cleanupJobId);
 		ConfirmedUploadService service = new ConfirmedUploadService(
-				userRepository,
+				authenticatedUsers,
 				collectionRepository,
 				uploadValidator,
 				uploadProperties,
@@ -98,7 +98,7 @@ class ConfirmedUploadServiceTest {
 				storageProperties);
 
 		var response = service.upload(
-				"owner@example.com",
+				"owner-id",
 				null,
 				List.of(file),
 				new UploadManifest(List.of(new UploadDecision(0, UploadDecisionType.UPLOAD, null))),

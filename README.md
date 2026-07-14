@@ -39,9 +39,10 @@ not require the root Compose services to be running.
 Configuration is read from environment variables documented in `.env.example`.
 For local development, the API also imports the gitignored root `.env` when it
 is launched from either the repository root or `knowledge-hub-api`. Real secrets
-and `.env` files must not be committed. To use OpenRouter instead of deterministic
-fake AI, set `AI_PROVIDER_API_KEY` to a real key and set `AI_FAKE_MODE=false` in
-that file.
+and `.env` files must not be committed. Fake mode disables Spring AI provider
+models and does not require an API key. To use OpenRouter, set
+`AI_PROVIDER_API_KEY` to a real key, set `AI_FAKE_MODE=false`, and set both
+`AI_MODEL_CHAT=openai` and `AI_MODEL_EMBEDDING=openai`.
 
 Local API documentation is available at `http://localhost:8080/swagger-ui.html`.
 The `prod` profile disables OpenAPI and automatic Docker Compose startup. Safe
@@ -95,6 +96,12 @@ secrets through the environment. At minimum, replace the development database,
 MinIO, JWT, CORS, cookie, and AI-provider values from `.env.example`. Production
 deployments should set `AUTH_SECURE_COOKIES=true`, use TLS, provision a
 prefix-restricted MinIO application key, and keep `AUTH_LOG_RESET_TOKENS=false`.
+Production startup fails when it detects local service URLs, development
+credentials, insecure cookies, reset-token logging, fake AI, disabled provider
+models, missing SMTP/provider configuration, or an omitted explicit
+`REGISTRATION_ENABLED` policy. It also requires `sslmode=verify-full` in
+`DATABASE_URL`, an HTTPS AI provider URL, and both `SMTP_STARTTLS_ENABLED=true`
+and `SMTP_STARTTLS_REQUIRED=true`.
 
 ## Continuous Integration
 

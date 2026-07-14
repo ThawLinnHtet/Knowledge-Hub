@@ -8,3 +8,12 @@ spring:
   docker:
     compose:
       enabled: false
+  ai:
+    model:
+      chat: openai
+      embedding: openai
+
+app:
+  storage:
+    access-key: ${MINIO_ACCESS_KEY:}
+    secret-key: ${MINIO_SECRET_KEY:}

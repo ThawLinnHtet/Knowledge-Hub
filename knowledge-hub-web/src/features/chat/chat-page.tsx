@@ -7,7 +7,7 @@ import {
   Send,
   Trash2,
 } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 
 import { Button } from '../../components/ui/button'
@@ -237,12 +237,25 @@ function Conversation({ session }: { session: ChatSession }) {
   const [message, setMessage] = useState('')
   const [streamed, setStreamed] = useState('')
   const [pendingQuestion, setPendingQuestion] = useState('')
+  const [pendingScope, setPendingScope] = useState<ChatScope>(session.scope)
+  const [failedTurn, setFailedTurn] = useState<{
+    question: string
+    scope: ChatScope
+    assistantMessageId: string | null
+  } | null>(null)
   const [streamError, setStreamError] = useState('')
   const [sending, setSending] = useState(false)
   const [documentPage, setDocumentPage] = useState(0)
+  const streamController = useRef<AbortController | null>(null)
   const messages = useQuery({
     queryKey: ['chat-messages', session.id],
     queryFn: () => getMessages(session.id),
+    refetchInterval: (query) =>
+      query.state.data?.some((item) =>
+        ['PENDING', 'STREAMING'].includes(item.status),
+      )
+        ? 1_000
+        : false,
   })
   const collections = useQuery({
     queryKey: ['collections'],
@@ -252,24 +265,85 @@ function Conversation({ session }: { session: ChatSession }) {
     queryKey: ['documents', 'READY', 'chat-scope', documentPage],
     queryFn: () => getDocuments('READY', documentPage, 100),
   })
+  const conversationActive = Boolean(
+    messages.data?.some((item) =>
+      ['PENDING', 'STREAMING'].includes(item.status),
+    ),
+  )
+  const messagesReady = messages.isSuccess
 
-  async function send(content: string) {
-    if (!accessToken || !content.trim() || sending || !validScope(scope)) return
+  useEffect(
+    () => () => {
+      streamController.current?.abort()
+    },
+    [],
+  )
+
+  const failedTurnRecovered = Boolean(
+    failedTurn?.assistantMessageId &&
+    messages.data?.some(
+      (item) =>
+        item.id === failedTurn.assistantMessageId && item.status === 'COMPLETE',
+    ),
+  )
+  const failedTurnActive = Boolean(
+    failedTurn?.assistantMessageId &&
+    messages.data?.some(
+      (item) =>
+        item.id === failedTurn.assistantMessageId &&
+        ['PENDING', 'STREAMING'].includes(item.status),
+    ),
+  )
+  const visibleStreamError = failedTurnRecovered ? '' : streamError
+  const retryableFailedTurn =
+    failedTurnRecovered || failedTurnActive ? null : failedTurn
+
+  async function send(
+    content: string,
+    requestedScope = scope,
+    existingAssistantMessageId: string | null = null,
+  ) {
+    if (
+      !accessToken ||
+      !content.trim() ||
+      sending ||
+      conversationActive ||
+      !messagesReady ||
+      !validScope(requestedScope)
+    )
+      return
     const question = content.trim()
+    let startedAssistantMessageId: string | null = null
+    const baselineAssistantIds = new Set(
+      messages.data
+        ?.filter((item) => item.role === 'ASSISTANT')
+        .map((item) => item.id) ?? [],
+    )
     setMessage('')
     setPendingQuestion(question)
+    setPendingScope(requestedScope)
+    setFailedTurn(null)
     setStreamed('')
     setStreamError('')
     setSending(true)
+    const controller = new AbortController()
+    streamController.current = controller
     try {
-      await streamChat(session.id, question, scope, accessToken, (event) => {
-        if (event.event === 'delta')
-          setStreamed((current) => current + event.data.text)
-        if (event.event === 'completed') setStreamed(event.data.content)
-        if (event.event === 'error') {
-          setStreamError(event.data.message)
-        }
-      })
+      await streamChat(
+        session.id,
+        question,
+        requestedScope,
+        accessToken,
+        (event) => {
+          if (event.event === 'started')
+            startedAssistantMessageId = event.data.assistantMessageId
+          if (event.event === 'delta')
+            setStreamed((current) => current + event.data.text)
+          if (event.event === 'completed') setStreamed(event.data.content)
+          if (event.event === 'error') setStreamError(event.data.message)
+        },
+        controller.signal,
+      )
       await Promise.all([
         queryClient.invalidateQueries({
           queryKey: ['chat-messages', session.id],
@@ -290,9 +364,31 @@ function Conversation({ session }: { session: ChatSession }) {
         }),
         queryClient.invalidateQueries({ queryKey: ['chats'] }),
       ])
+      const refreshedMessages = queryClient.getQueryData<ChatMessage[]>([
+        'chat-messages',
+        session.id,
+      ])
+      const persistedAssistantMessageId = [...(refreshedMessages ?? [])]
+        .reverse()
+        .find(
+          (item) =>
+            item.role === 'ASSISTANT' &&
+            item.id !== existingAssistantMessageId &&
+            !baselineAssistantIds.has(item.id),
+        )?.id
+      setFailedTurn({
+        question,
+        scope: requestedScope,
+        assistantMessageId:
+          startedAssistantMessageId ??
+          persistedAssistantMessageId ??
+          existingAssistantMessageId,
+      })
       setPendingQuestion('')
       setStreamed('')
     } finally {
+      if (streamController.current === controller)
+        streamController.current = null
       setSending(false)
     }
   }
@@ -308,7 +404,7 @@ function Conversation({ session }: { session: ChatSession }) {
         collections={collections.data ?? []}
         documentPage={documentPage}
         documents={documents.data?.items ?? []}
-        disabled={sending}
+        disabled={sending || conversationActive || !messagesReady}
         onChange={setScope}
         onDocumentPageChange={setDocumentPage}
         scope={scope}
@@ -323,14 +419,25 @@ function Conversation({ session }: { session: ChatSession }) {
             Loading conversation...
           </p>
         ) : messages.error ? (
-          <p className="error-box" role="alert">
-            {
-              getApiError(
-                messages.error,
-                'Conversation history is unavailable.',
-              ).message
-            }
-          </p>
+          <div className="error-box" role="alert">
+            <p>
+              {
+                getApiError(
+                  messages.error,
+                  'Conversation history is unavailable.',
+                ).message
+              }
+            </p>
+            <Button
+              className="mt-3"
+              disabled={messages.isFetching}
+              onClick={() => void messages.refetch()}
+              type="button"
+              variant="ghost"
+            >
+              Retry loading conversation
+            </Button>
+          </div>
         ) : messages.data?.length ? (
           messages.data.map((item) => <Message key={item.id} message={item} />)
         ) : !pendingQuestion ? (
@@ -354,7 +461,7 @@ function Conversation({ session }: { session: ChatSession }) {
               role: 'USER',
               status: 'COMPLETE',
               content: pendingQuestion,
-              scope,
+              scope: pendingScope,
               citations: [],
               createdAt: new Date().toISOString(),
             }}
@@ -367,23 +474,41 @@ function Conversation({ session }: { session: ChatSession }) {
               role: 'ASSISTANT',
               status: 'STREAMING',
               content: streamed,
-              scope,
+              scope: pendingScope,
               citations: [],
               createdAt: new Date().toISOString(),
             }}
             streaming={sending}
           />
         ) : null}
-        {streamError ? (
+        {visibleStreamError ? (
           <div
             className="rounded-md border border-red-900 bg-red-950/25 p-4"
             role="alert"
           >
-            <p className="text-sm text-red-200">{streamError}</p>
+            <p className="text-sm text-red-200">{visibleStreamError}</p>
             <p className="mt-2 text-xs text-[var(--text-muted)]">
               The turn may already be saved. Review the history before sending a
               new attempt.
             </p>
+            {retryableFailedTurn ? (
+              <Button
+                className="mt-3"
+                disabled={sending || !messagesReady}
+                onClick={() => {
+                  setScope(retryableFailedTurn.scope)
+                  void send(
+                    retryableFailedTurn.question,
+                    retryableFailedTurn.scope,
+                    retryableFailedTurn.assistantMessageId,
+                  )
+                }}
+                type="button"
+                variant="ghost"
+              >
+                Retry question
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -398,7 +523,7 @@ function Conversation({ session }: { session: ChatSession }) {
           <textarea
             aria-label="Message"
             className="min-h-12 max-h-36 flex-1 resize-y rounded-md border border-[var(--border-strong)] bg-[var(--surface-dark)] px-4 py-3 text-sm leading-6 outline-none placeholder:text-[var(--text-faint)] focus:border-[var(--accent-soft)]"
-            disabled={sending}
+            disabled={sending || conversationActive || !messagesReady}
             id="chat-message"
             maxLength={4000}
             onChange={(event) => setMessage(event.target.value)}
@@ -418,7 +543,13 @@ function Conversation({ session }: { session: ChatSession }) {
           <Button
             aria-label="Send message"
             className="size-12 px-0"
-            disabled={!message.trim() || sending || !validScope(scope)}
+            disabled={
+              !message.trim() ||
+              sending ||
+              conversationActive ||
+              !messagesReady ||
+              !validScope(scope)
+            }
             type="submit"
           >
             <Send className="size-4" />
@@ -572,7 +703,9 @@ function Message({
   const content =
     message.status === 'FAILED' && !message.content
       ? 'This response could not be completed.'
-      : message.content
+      : ['PENDING', 'STREAMING'].includes(message.status) && !message.content
+        ? 'Completing response...'
+        : message.content
   return (
     <article className={assistant ? 'max-w-3xl' : 'ml-auto max-w-2xl'}>
       <p className="font-data mb-2 text-[9px] tracking-[0.12em] text-[var(--text-faint)]">
@@ -587,7 +720,7 @@ function Message({
       >
         <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--text-primary)]">
           {content}
-          {streaming ? (
+          {streaming || ['PENDING', 'STREAMING'].includes(message.status) ? (
             <span
               aria-label="Streaming response"
               className="ml-1 inline-block h-4 w-1 animate-pulse bg-[var(--accent-soft)]"

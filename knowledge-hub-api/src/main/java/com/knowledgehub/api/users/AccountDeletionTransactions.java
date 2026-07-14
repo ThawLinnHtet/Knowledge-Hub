@@ -13,7 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class AccountDeletionTransactions {
 
-	private static final int MAX_RETRIES = 5;
+	private static final int MAX_BACKOFF_MINUTES = 60;
 	private final AccountDeletionJobRepository jobRepository;
 	private final UserRepository userRepository;
 
@@ -35,12 +35,10 @@ public class AccountDeletionTransactions {
 			job.setFailureMessage(failureMessage);
 			job.setLockedAt(null);
 			job.setLockExpiresAt(null);
-			if (job.getRetryCount() >= MAX_RETRIES) {
-				job.setStatus(AccountDeletionJobEntity.Status.FAILED);
-			} else {
-				job.setStatus(AccountDeletionJobEntity.Status.PENDING);
-				job.setNextRetryAt(now.plus(Duration.ofMinutes(job.getRetryCount())));
-			}
+			job.setStatus(AccountDeletionJobEntity.Status.PENDING);
+			int exponent = Math.min(job.getRetryCount() - 1, 6);
+			long backoffMinutes = Math.min(MAX_BACKOFF_MINUTES, 1L << exponent);
+			job.setNextRetryAt(now.plus(Duration.ofMinutes(backoffMinutes)));
 			job.setUpdatedAt(Instant.now());
 		});
 	}

@@ -3,8 +3,8 @@ package com.knowledgehub.api.collections;
 import com.knowledgehub.api.common.ApiException;
 import com.knowledgehub.api.common.ErrorCode;
 import com.knowledgehub.api.documents.DocumentRepository;
+import com.knowledgehub.api.users.AuthenticatedUserService;
 import com.knowledgehub.api.users.UserEntity;
-import com.knowledgehub.api.users.UserRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -21,14 +21,14 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class CollectionService {
 
-	private final UserRepository userRepository;
+	private final AuthenticatedUserService authenticatedUsers;
 	private final CollectionRepository collectionRepository;
 	private final DocumentRepository documentRepository;
 	private final CollectionMapper collectionMapper;
 
 	@Transactional(readOnly = true)
 	public List<CollectionController.CollectionResponse> list(String email) {
-		UserEntity user = requireUser(email);
+		UserEntity user = authenticatedUsers.requireActive(email);
 		List<CollectionEntity> collections =
 				collectionRepository.findByUserIdOrderByUncategorizedDescNameAsc(user.getId());
 		Map<UUID, DocumentRepository.CollectionDocumentCount> counts = documentRepository
@@ -48,7 +48,7 @@ public class CollectionService {
 
 	@Transactional
 	public CollectionController.CollectionResponse create(String email, String requestedName) {
-		UserEntity user = requireUser(email);
+		UserEntity user = authenticatedUsers.requireActive(email);
 		String name = requestedName.trim();
 		if (collectionRepository.existsByUserIdAndNameIgnoreCase(user.getId(), name)) {
 			throw nameUnavailable();
@@ -67,7 +67,7 @@ public class CollectionService {
 	@Transactional
 	public CollectionController.CollectionResponse rename(
 			String email, UUID collectionId, String requestedName) {
-		UserEntity user = requireUser(email);
+		UserEntity user = authenticatedUsers.requireActive(email);
 		CollectionEntity collection = requireOwnedWithLock(collectionId, user.getId());
 		protectUncategorized(collection);
 		String name = requestedName.trim();
@@ -88,7 +88,7 @@ public class CollectionService {
 
 	@Transactional
 	public void delete(String email, UUID collectionId) {
-		UserEntity user = requireUser(email);
+		UserEntity user = authenticatedUsers.requireActive(email);
 		CollectionEntity collection = requireOwnedWithLock(collectionId, user.getId());
 		protectUncategorized(collection);
 		CollectionEntity fallback = collectionRepository
@@ -96,14 +96,6 @@ public class CollectionService {
 				.orElseThrow(() -> new IllegalStateException("Uncategorized collection is missing."));
 		documentRepository.moveToCollection(user.getId(), collection.getId(), fallback, Instant.now());
 		collectionRepository.delete(collection);
-	}
-
-	private UserEntity requireUser(String email) {
-		return userRepository.findByEmailIgnoreCase(email)
-				.orElseThrow(() -> new ApiException(
-						ErrorCode.AUTHENTICATION_REQUIRED,
-						HttpStatus.UNAUTHORIZED,
-						"Authentication is required."));
 	}
 
 	private CollectionEntity requireOwnedWithLock(UUID collectionId, UUID userId) {

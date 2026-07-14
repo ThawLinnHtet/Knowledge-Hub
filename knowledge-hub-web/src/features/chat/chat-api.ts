@@ -105,8 +105,10 @@ export async function streamChat(
   const decoder = new TextDecoder()
   let buffer = ''
   let terminal = false
+  let terminalError: Error | null = null
   const handleEvent = (event: StreamEvent) => {
     if (event.event === 'completed' || event.event === 'error') terminal = true
+    if (event.event === 'error') terminalError = new Error(event.data.message)
     onEvent(event)
   }
   while (true) {
@@ -118,7 +120,12 @@ export async function streamChat(
       buffer = buffer.slice(boundary.index + boundary.length)
       parseFrame(frame, handleEvent)
       if (terminal) {
-        await reader.cancel()
+        try {
+          await reader.cancel()
+        } catch {
+          // Preserve the server's terminal error when stream cancellation also fails.
+        }
+        if (terminalError) throw terminalError
         return
       }
       boundary = findFrameBoundary(buffer)
@@ -126,6 +133,7 @@ export async function streamChat(
     if (done) break
   }
   if (buffer.trim()) parseFrame(buffer, handleEvent)
+  if (terminalError) throw terminalError
   if (!terminal)
     throw new Error('The chat response was interrupted before completion.')
 }

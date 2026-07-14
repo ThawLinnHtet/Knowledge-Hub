@@ -13,8 +13,8 @@ import com.knowledgehub.api.documents.UploadValidator.UploadRejectedException;
 import com.knowledgehub.api.storage.ObjectStorageException;
 import com.knowledgehub.api.storage.StorageCleanupService;
 import com.knowledgehub.api.storage.StorageProperties;
+import com.knowledgehub.api.users.AuthenticatedUserService;
 import com.knowledgehub.api.users.UserEntity;
-import com.knowledgehub.api.users.UserRepository;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,7 +32,7 @@ import org.springframework.web.multipart.MultipartFile;
 public class ConfirmedUploadService {
 
 	private static final Logger log = LoggerFactory.getLogger(ConfirmedUploadService.class);
-	private final UserRepository userRepository;
+	private final AuthenticatedUserService authenticatedUsers;
 	private final CollectionRepository collectionRepository;
 	private final UploadValidator uploadValidator;
 	private final UploadProperties uploadProperties;
@@ -47,11 +47,7 @@ public class ConfirmedUploadService {
 			UploadManifest manifest,
 			String requestId) {
 		validateManifest(files, manifest);
-		UserEntity user = userRepository.findByEmailIgnoreCase(email)
-				.orElseThrow(() -> new ApiException(
-						ErrorCode.AUTHENTICATION_REQUIRED,
-						HttpStatus.UNAUTHORIZED,
-						"Authentication is required."));
+		UserEntity user = authenticatedUsers.requireActive(email);
 		CollectionEntity target = requestedCollectionId == null
 				? collectionRepository
 						.findByUserIdAndUncategorizedTrue(user.getId())

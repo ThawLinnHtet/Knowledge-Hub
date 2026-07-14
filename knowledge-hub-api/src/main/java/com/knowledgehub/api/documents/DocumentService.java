@@ -6,8 +6,7 @@ import com.knowledgehub.api.storage.ObjectStorage;
 import com.knowledgehub.api.storage.ObjectStorageException;
 import com.knowledgehub.api.storage.StorageProperties;
 import com.knowledgehub.api.storage.StorageCleanupService;
-import com.knowledgehub.api.users.UserEntity;
-import com.knowledgehub.api.users.UserRepository;
+import com.knowledgehub.api.users.AuthenticatedUserService;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -32,7 +31,7 @@ import org.slf4j.LoggerFactory;
 public class DocumentService {
 	private static final Logger log = LoggerFactory.getLogger(DocumentService.class);
 
-	private final UserRepository userRepository;
+	private final AuthenticatedUserService authenticatedUsers;
 	private final DocumentRepository documentRepository;
 	private final DocumentMapper documentMapper;
 	private final ObjectStorage objectStorage;
@@ -62,7 +61,7 @@ public class DocumentService {
 					HttpStatus.BAD_REQUEST,
 					"The upload date range is invalid.");
 		}
-		UUID userId = requireUser(email).getId();
+		UUID userId = authenticatedUsers.userId(email);
 		String normalizedExtension = fileExtension == null || fileExtension.isBlank()
 				? null
 				: fileExtension.trim().toLowerCase(Locale.ROOT);
@@ -87,7 +86,7 @@ public class DocumentService {
 
 	@Transactional(readOnly = true)
 	public DocumentDtos.DocumentDetailResponse detail(String email, UUID documentId) {
-		UUID userId = requireUser(email).getId();
+		UUID userId = authenticatedUsers.userId(email);
 		DocumentEntity document = requireOwned(documentId, userId);
 		return DocumentDtos.DocumentDetailResponse.from(
 				documentMapper.toResponse(document),
@@ -96,7 +95,7 @@ public class DocumentService {
 	}
 
 	public DocumentDtos.DownloadUrlResponse downloadUrl(String email, UUID documentId) {
-		UUID userId = requireUser(email).getId();
+		UUID userId = authenticatedUsers.userId(email);
 		DocumentEntity document = requireOwned(documentId, userId);
 		Instant expiresAt = Instant.now().plus(storageProperties.downloadUrlTtl());
 		try {
@@ -114,7 +113,7 @@ public class DocumentService {
 
 	@Transactional
 	public DocumentDtos.DocumentResponse retry(String email, UUID documentId) {
-		UUID userId = requireUser(email).getId();
+		UUID userId = authenticatedUsers.userId(email);
 		DocumentEntity document = requireOwnedWithLock(documentId, userId);
 		if (document.getStatus() != DocumentEntity.Status.FAILED || !document.isRetryable()) {
 			throw new ApiException(
@@ -138,7 +137,7 @@ public class DocumentService {
 
 	@Transactional
 	public void delete(String email, UUID documentId) {
-		UUID userId = requireUser(email).getId();
+		UUID userId = authenticatedUsers.userId(email);
 		DocumentEntity document = requireOwnedWithLock(documentId, userId);
 		UUID cleanupJobId = storageCleanupService.schedule(
 				userId, document.getObjectKey(), Duration.ofMinutes(1));
@@ -207,14 +206,6 @@ public class DocumentService {
 				result.getObject("chunk_position", Integer.class),
 				result.getDouble("relevance_score"),
 				result.getBoolean("source_deleted"));
-	}
-
-	private UserEntity requireUser(String email) {
-		return userRepository.findByEmailIgnoreCase(email)
-				.orElseThrow(() -> new ApiException(
-						ErrorCode.AUTHENTICATION_REQUIRED,
-						HttpStatus.UNAUTHORIZED,
-						"Authentication is required."));
 	}
 
 	private DocumentEntity requireOwned(UUID documentId, UUID userId) {

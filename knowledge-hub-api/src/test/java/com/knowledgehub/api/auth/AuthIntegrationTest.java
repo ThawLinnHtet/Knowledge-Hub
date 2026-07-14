@@ -52,9 +52,11 @@ class AuthIntegrationTest {
 
 	@Test
 	void registerLoginRotateRefreshLogoutAndAuthorizeBearerToken() throws Exception {
-		register(EMAIL, PASSWORD)
+		MvcResult registration = register(EMAIL, PASSWORD)
 				.andExpect(status().isCreated())
-				.andExpect(jsonPath("$.email").value(EMAIL));
+				.andExpect(jsonPath("$.email").value(EMAIL))
+				.andReturn();
+		String userId = body(registration).get("id").asText();
 
 		register(EMAIL.toUpperCase(), PASSWORD)
 				.andExpect(status().isConflict())
@@ -74,7 +76,7 @@ class AuthIntegrationTest {
 		mockMvc.perform(get("/api/v1/test/protected")
 						.header("Authorization", "Bearer " + firstAccessToken))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.subject").value(EMAIL));
+				.andExpect(jsonPath("$.subject").value(userId));
 
 		MvcResult refresh = mockMvc.perform(post("/api/v1/auth/refresh")
 						.with(csrf())

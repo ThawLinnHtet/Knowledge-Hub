@@ -30,6 +30,8 @@ const api = spawn(executable, ['spring-boot:run'], {
   env: {
     ...process.env,
     AI_FAKE_MODE: 'true',
+    AI_MODEL_CHAT: 'none',
+    AI_MODEL_EMBEDDING: 'none',
     AUTH_LOG_RESET_TOKENS: 'false',
     APP_BASE_URL: 'http://127.0.0.1:18080',
     APP_WEB_URL: 'http://127.0.0.1:15173',

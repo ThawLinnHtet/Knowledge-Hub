@@ -18,4 +18,18 @@ public record ChatProperties(
 		@Positive int retrievedChunkLimit,
 		@DecimalMin("0.0") @DecimalMax("1.0") double minimumKeywordScore,
 		@DecimalMin("0.0") @DecimalMax("1.0") double minimumSemanticScore,
-		Duration streamTimeout) {}
+		Duration streamTimeout,
+		Duration heartbeatInterval) {
+
+	public ChatProperties {
+		if (streamTimeout == null || streamTimeout.toMillis() < 1) {
+			throw new IllegalArgumentException("Chat stream timeout must be positive.");
+		}
+		if (heartbeatInterval == null
+				|| heartbeatInterval.toMillis() < 1
+				|| heartbeatInterval.compareTo(streamTimeout) >= 0) {
+			throw new IllegalArgumentException(
+					"Chat heartbeat interval must be positive and shorter than the stream timeout.");
+		}
+	}
+}
